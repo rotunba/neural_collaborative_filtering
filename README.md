@@ -24,6 +24,8 @@ Versions of dependencies that worked
 - Werkzeug (0.12.2)
 - wheel (0.29.0)
 
+Working copy: https://goo.gl/2Mnbck
+
 # Neural Collaborative Filtering
 
 This is our implementation for the paper:
