@@ -41,7 +41,7 @@ def parse_args():
                         help="Regularization for each layer")
     parser.add_argument('--num_neg', type=int, default=4,
                         help='Number of negative instances to pair with a positive instance.')
-    parser.add_argument('--lr', type=float, default=0.01,
+    parser.add_argument('--lr', type=float, default=0.001,
                         help='Learning rate.')
     parser.add_argument('--learner', nargs='?', default='adagrad',
                         help='Specify an optimizer: adagrad, adam, rmsprop, sgd')
@@ -109,13 +109,13 @@ def get_train_instances(train, num_negatives):
         labels.append(1)
         # negative instances
 #         for t in xrange(num_negatives):
-        user_input.append(u)
-        neg_item_input.append(i)
-        j = np.random.randint(num_items)
-        while train.has_key((u, j)):
-            j = np.random.randint(num_items)
-        item_input.append(j)
-        labels.append(-1)
+#         user_input.append(u)
+#         neg_item_input.append(i)
+#         j = np.random.randint(num_items)
+#         while train.has_key((u, j)):
+#             j = np.random.randint(num_items)
+#         item_input.append(j)
+#         labels.append(0)
             
     
     return user_input, item_input, neg_item_input, labels
@@ -149,7 +149,7 @@ if __name__ == '__main__':
     # Build model
     model = get_model(num_users, num_items, layers, reg_layers)
     if learner.lower() == "adagrad": 
-        model.compile(optimizer=Adagrad(lr=learning_rate), loss='binary_crossentropy')
+        model.compile(optimizer=Adagrad(lr=learning_rate), loss='binary_crossentropy', metrics=['accuracy'])
     elif learner.lower() == "rmsprop":
         model.compile(optimizer=RMSprop(lr=learning_rate), loss='binary_crossentropy')
     elif learner.lower() == "adam":
@@ -177,7 +177,7 @@ if __name__ == '__main__':
         t2 = time()
 
         # Evaluation
-        if epoch %100 == 0:
+        if epoch % verbose == 0:
             (hits, ndcgs) = evaluate_model(model, testRatings, testNegatives, topK, evaluation_threads)
             hr, ndcg, loss = np.array(hits).mean(), np.array(ndcgs).mean(), hist.history['loss'][0]
             print('Iteration %d [%.1f s]: HR = %.4f, NDCG = %.4f, loss = %.4f [%.1f s]' 
