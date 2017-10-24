@@ -31,7 +31,7 @@ def parse_args():
                         help='Input data path.')
     parser.add_argument('--dataset', nargs='?', default='ml-1m',
                         help='Choose a dataset.')
-    parser.add_argument('--epochs', type=int, default=1000000,
+    parser.add_argument('--epochs', type=int, default=100,
                         help='Number of epochs.')
     parser.add_argument('--batch_size', type=int, default=256,
                         help='Batch size.')
@@ -41,9 +41,9 @@ def parse_args():
                         help="Regularization for each layer")
     parser.add_argument('--num_neg', type=int, default=4,
                         help='Number of negative instances to pair with a positive instance.')
-    parser.add_argument('--lr', type=float, default=0.001,
+    parser.add_argument('--lr', type=float, default=0.001,#0.001 wins
                         help='Learning rate.')
-    parser.add_argument('--learner', nargs='?', default='adagrad',
+    parser.add_argument('--learner', nargs='?', default='adagrad', #adagrad wins here
                         help='Specify an optimizer: adagrad, adam, rmsprop, sgd')
     parser.add_argument('--verbose', type=int, default=1,
                         help='Show performance per X iterations')
@@ -88,7 +88,6 @@ def get_model(num_users, num_items, layers = [20,10], reg_layers=[0,0]):
     pos = Dense(1,  kernel_initializer='lecun_uniform',activation='sigmoid', name = 'pos_prediction')(pos_vector)
     neg = Dense(1,  kernel_initializer='lecun_uniform', activation='sigmoid', name = 'neg_prediction')(neg_vector)
     # Equivalent to subtracted = keras.layers.subtract([x1, x2])
-    #subtracted = merge([pos, neg], mode=lambda x: x[0] - x[1], output_shape=lambda x: x[0])
     subtracted = keras.layers.subtract([pos, neg])
     out = Dense(1, kernel_initializer='lecun_uniform', activation='sigmoid',  name = 'subtracted')(subtracted)
     model = Model(outputs=out, inputs=[user_input, item_input, neg_item_input])
@@ -100,23 +99,24 @@ def get_train_instances(train, num_negatives):
     num_users = train.shape[0]
     for (u, i) in train.keys():
         # positive instance
-        user_input.append(u)
-        item_input.append(i)
-        j = np.random.randint(num_items)
-        while train.has_key((u, j)):
+        for t in xrange(5):
+            user_input.append(u)
+            item_input.append(i)
             j = np.random.randint(num_items)
-        neg_item_input.append(j)
-        labels.append(1)
+            while train.has_key((u, j)):
+                j = np.random.randint(num_items)
+            neg_item_input.append(j)
+            labels.append(1)
         # negative instances
 #         for t in xrange(num_negatives):
-#         user_input.append(u)
-#         neg_item_input.append(i)
-#         j = np.random.randint(num_items)
-#         while train.has_key((u, j)):
+#             user_input.append(u)
+#             neg_item_input.append(i)
 #             j = np.random.randint(num_items)
-#         item_input.append(j)
-#         labels.append(0)
-            
+#             while train.has_key((u, j)):
+#                 j = np.random.randint(num_items)
+#             item_input.append(j)
+#             labels.append(0)
+                
     
     return user_input, item_input, neg_item_input, labels
 
@@ -149,7 +149,7 @@ if __name__ == '__main__':
     # Build model
     model = get_model(num_users, num_items, layers, reg_layers)
     if learner.lower() == "adagrad": 
-        model.compile(optimizer=Adagrad(lr=learning_rate), loss='binary_crossentropy', metrics=['accuracy'])
+        model.compile(optimizer=Adagrad(lr=learning_rate), loss='binary_crossentropy')
     elif learner.lower() == "rmsprop":
         model.compile(optimizer=RMSprop(lr=learning_rate), loss='binary_crossentropy')
     elif learner.lower() == "adam":
