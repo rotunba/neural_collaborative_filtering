@@ -7,7 +7,7 @@ Versions of dependencies that worked
 - funcsigs (1.0.2)
 - h5py (2.7.0)
 - html5lib (0.9999999)
-- Keras (2.0.8)
+- Keras (1.2.2) pip install https://github.com/fchollet/keras/tarball/1.2.2
 - Markdown (2.6.8)
 - mock (2.0.0)
 - numpy (1.13.1)

@@ -5,19 +5,19 @@ Logistic loss for learning MLP model.
 @author: Xiangnan He (xiangnanhe@gmail.com)
 '''
 import numpy as np
-import random
+
 import theano
 import theano.tensor as T
 import keras
 from keras import backend as K
-from keras import initializers
-from keras.regularizers import l2
+from keras import initializations
+from keras.regularizers import l2, activity_l2
 from keras.models import Sequential, Model
 from keras.layers.core import Dense, Lambda, Activation
-from keras.layers import Embedding, Input, Dense, merge, Reshape, Merge, Flatten, Dropout, concatenate
+from keras.layers import Embedding, Input, Dense, merge, Reshape, Merge, Flatten, Dropout
 from keras.constraints import maxnorm
-from keras.optimizers import Adagrad, Adam, SGD, RMSprop, adagrad
-from evaluate import evaluate_model
+from keras.optimizers import Adagrad, Adam, SGD, RMSprop
+from evaluate_mlppairwise import evaluate_model
 from Dataset import Dataset
 from time import time
 import sys
@@ -27,17 +27,17 @@ import multiprocessing as mp
 #################### Arguments ####################
 def parse_args():
     parser = argparse.ArgumentParser(description="Run MLP.")
-    parser.add_argument('--path', nargs='?', default='data/',
+    parser.add_argument('--path', nargs='?', default='Data/',
                         help='Input data path.')
     parser.add_argument('--dataset', nargs='?', default='ml-1m',
                         help='Choose a dataset.')
-    parser.add_argument('--epochs', type=int, default=100,
+    parser.add_argument('--epochs', type=int, default=10000,
                         help='Number of epochs.')
-    parser.add_argument('--batch_size', type=int, default=256,
+    parser.add_argument('--batch_size', type=int, default=512,
                         help='Batch size.')
-    parser.add_argument('--layers', nargs='?', default='[64,32,16, 8]',
+    parser.add_argument('--layers', nargs='?', default='[64,32,16,8]',
                         help="Size of each layer. Note that the first layer is the concatenation of user and item embeddings. So layers[0]/2 is the embedding size.")
-    parser.add_argument('--reg_layers', nargs='?', default='[0,0,0,0]',
+    parser.add_argument('--reg_layers', nargs='?', default='[0.0001,0.0001,0.0001,0.0001]',
                         help="Regularization for each layer")
     parser.add_argument('--num_neg', type=int, default=4,
                         help='Number of negative instances to pair with a positive instance.')
@@ -47,12 +47,12 @@ def parse_args():
                         help='Specify an optimizer: adagrad, adam, rmsprop, sgd')
     parser.add_argument('--verbose', type=int, default=1,
                         help='Show performance per X iterations')
-    parser.add_argument('--out', type=int, default=1,
+    parser.add_argument('--out', type=int, default=0,
                         help='Whether to save the trained model.')
     return parser.parse_args()
 
-def init_normal(shape, dtype=None):
-    return K.random_normal(shape, dtype=dtype)
+def init_normal(shape, name=None):
+    return initializations.normal(shape, scale=0.01, name=name)
 
 def get_model(num_users, num_items, layers = [20,10], reg_layers=[0,0]):
     assert len(layers) == len(reg_layers)
@@ -62,10 +62,10 @@ def get_model(num_users, num_items, layers = [20,10], reg_layers=[0,0]):
     item_input = Input(shape=(1,), dtype='int32', name = 'item_input')
     neg_item_input = Input(shape=(1,), dtype='int32', name = 'neg_item_input')
 
-    MLP_Embedding_User = Embedding(embeddings_initializer='lecun_normal', output_dim = layers[0]/2, 
-                                  embeddings_regularizer = l2(reg_layers[0]), input_dim = num_users, input_length=1)
-    MLP_Embedding_Item = Embedding(embeddings_initializer='lecun_normal', output_dim = layers[0]/2, 
-                                  embeddings_regularizer = l2(reg_layers[0]), input_dim = num_items, input_length=1)   
+    MLP_Embedding_User = Embedding(input_dim = num_users, output_dim = layers[0]/2, name = 'user_embedding',
+                                  init = init_normal, W_regularizer = l2(reg_layers[0]), input_length=1)
+    MLP_Embedding_Item = Embedding(input_dim = num_items, output_dim = layers[0]/2, name = 'item_embedding',
+                                  init = init_normal, W_regularizer = l2(reg_layers[0]), input_length=1)   
     
     # Crucial to flatten an embedding vector!
     user_latent = Flatten()(MLP_Embedding_User(user_input))
@@ -73,25 +73,23 @@ def get_model(num_users, num_items, layers = [20,10], reg_layers=[0,0]):
     neg_item_latent  = Flatten()(MLP_Embedding_Item(neg_item_input))
     
     # The 0-th layer is the concatenation of embedding layers
-    pos_vector = concatenate([user_latent, item_latent])
-    neg_vector = concatenate([user_latent, neg_item_latent])
+    pos_vector = merge([user_latent, item_latent], mode = 'concat')
+    neg_vector = merge([user_latent, neg_item_latent], mode = 'concat')
     
     # MLP layers
     for idx in xrange(1, num_layer):
-        layer = Dense(layers[idx], activation='relu', kernel_regularizer= l2(reg_layers[idx]),  name = 'layer%d' %idx)
+        layer = Dense(layers[idx], W_regularizer= l2(reg_layers[idx]), activation='relu', name = 'layer%d' %idx)
         pos_vector = layer(pos_vector)
         neg_vector = layer(neg_vector)
         
     # Final prediction layer
-    #prediction = Dense(1, activation='sigmoid', init='lecun_uniform', name = 'prediction')(vector)
-    
-    pos = Dense(1,  kernel_initializer='lecun_uniform',activation='sigmoid', name = 'pos_prediction')(pos_vector)
-    neg = Dense(1,  kernel_initializer='lecun_uniform', activation='sigmoid', name = 'neg_prediction')(neg_vector)
+    pos = Dense(1, activation='sigmoid', init='lecun_uniform', name = 'pos_prediction')(pos_vector)
+    neg = Dense(1, activation='sigmoid', init='lecun_uniform', name = 'neg_prediction')(neg_vector)
     # Equivalent to subtracted = keras.layers.subtract([x1, x2])
-    subtracted = keras.layers.subtract([pos, neg])
-    out = Dense(1, kernel_initializer='lecun_uniform', activation='sigmoid',  name = 'subtracted')(subtracted)
-    model = Model(outputs=out, inputs=[user_input, item_input, neg_item_input])
-    
+    subtracted = merge([pos, neg], mode=lambda x: x[0] - x[1], output_shape=lambda x: x[0])
+    out = Dense(1, activation='sigmoid', init='lecun_uniform',  name = 'subtracted')(subtracted)
+    model = Model(input=[user_input, item_input, neg_item_input], 
+                  output=out)
     return model
 
 def get_train_instances(train, num_negatives):
@@ -99,23 +97,23 @@ def get_train_instances(train, num_negatives):
     num_users = train.shape[0]
     for (u, i) in train.keys():
         # positive instance
-        for t in xrange(5):
-            user_input.append(u)
-            item_input.append(i)
+        #for t in xrange(5):
+        user_input.append(u)
+        item_input.append(i)
+        j = np.random.randint(num_items)
+        while train.has_key((u, j)):
             j = np.random.randint(num_items)
-            while train.has_key((u, j)):
-                j = np.random.randint(num_items)
-            neg_item_input.append(j)
-            labels.append(1)
+        neg_item_input.append(j)
+        labels.append(1)
         # negative instances
 #         for t in xrange(num_negatives):
-#             user_input.append(u)
-#             neg_item_input.append(i)
+#         user_input.append(u)
+#         neg_item_input.append(i)
+#         j = np.random.randint(num_items)
+#         while train.has_key((u, j)):
 #             j = np.random.randint(num_items)
-#             while train.has_key((u, j)):
-#                 j = np.random.randint(num_items)
-#             item_input.append(j)
-#             labels.append(0)
+#         item_input.append(j)
+#         labels.append(-1)
                 
     
     return user_input, item_input, neg_item_input, labels
@@ -149,7 +147,7 @@ if __name__ == '__main__':
     # Build model
     model = get_model(num_users, num_items, layers, reg_layers)
     if learner.lower() == "adagrad": 
-        model.compile(optimizer=Adagrad(lr=learning_rate), loss='binary_crossentropy')
+        model.compile(optimizer=Adagrad(lr=learning_rate), loss='binary_crossentropy',  metrics=['binary_accuracy'])
     elif learner.lower() == "rmsprop":
         model.compile(optimizer=RMSprop(lr=learning_rate), loss='binary_crossentropy')
     elif learner.lower() == "adam":
@@ -173,11 +171,11 @@ if __name__ == '__main__':
         # Training        
         hist = model.fit([np.array(user_input), np.array(item_input), np.array(neg_item_input)], #input
                          np.array(labels), # labels 
-                         batch_size=batch_size, epochs=1, verbose=0, shuffle=True)
+                         batch_size=batch_size, nb_epoch=1, verbose=0, shuffle=True)
         t2 = time()
 
         # Evaluation
-        if epoch % verbose == 0:
+        if epoch %verbose == 0:
             (hits, ndcgs) = evaluate_model(model, testRatings, testNegatives, topK, evaluation_threads)
             hr, ndcg, loss = np.array(hits).mean(), np.array(ndcgs).mean(), hist.history['loss'][0]
             print('Iteration %d [%.1f s]: HR = %.4f, NDCG = %.4f, loss = %.4f [%.1f s]' 
